@@ -12,29 +12,29 @@ IDE: VS Code
 Launch an Ec2 Ubuntu instance (T2 medium) and for SG, open ports 22 (allow ssh traffic) and port 8080. We will install Jenkins & Docker on the server using bootstrap with userdata script to install docker or SSH into the istance and run the commands below to install jenkins and docker.
 
 # install Jenkins
-a) Update system package
+  a) Update system package
    sudo apt update 
-b) Install Java Version 8 or 11
+  b) Install Java Version 8 or 11
    sudo apt install openjdk-11-jdk -y
-c) Confirm java is installed
+  c) Confirm java is installed
    java -version
-d) Add Jenkins repo to Ubuntu by importing GPG key to verify package integrity & then add Jenkins repo to source list
+  d) Add Jenkins repo to Ubuntu by importing GPG key to verify package integrity & then add Jenkins repo to source list
    curl -fsSL https://pkg.jenkins.io/debian-stable/jenkins.io.key | sudo tee /usr/share/keyrings/jenkins-keyring.asc &gt; /dev/null
    echo deb [signed-by=/usr/share/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian-stable binary/ | sudo tee /etc/apt/sources.list.d/jenkins.list &gt; /dev/null
-e) Update repo again and install jenkins
+  e) Update repo again and install jenkins
    sudo apt update
    sudo apt install jenkins -y
    sudo systemctl status jenkins
    sudo systemctl enable --now jenkins # run this command if jenkins service is not running or active
-f) Modify firewalls to allow jenkins port if not opened
+ f) Modify firewalls to allow jenkins port if not opened
    sudo ufw allow 8080
    sudo ufw status
    sudo ufw enable # run this command if status is inactive 
-g) open Jenkins ip on web browser to set up jenkins
+ g) open Jenkins ip on web browser to set up jenkins
    http://ip_address:8080
-h) cat the path seen on the page to unlock jenkins password
+ h) cat the path seen on the page to unlock jenkins password
    sudo cat /var/lib/jenkins/secrets/initialAdminPassword
-i) Enter the password output in the Administrator password field and click Continue. Install suggested pluggins and create first admin by entering credentials you want    to use as jenkins admin. set up instance configuration, save and start using jenkins.
+ i) Enter the password output in the Administrator password field and click Continue. Install suggested pluggins and create first admin by entering credentials you want    to use as jenkins admin. set up instance configuration, save and start using jenkins.
 
  # install Docker on Jenkins
  a) Install Docker
