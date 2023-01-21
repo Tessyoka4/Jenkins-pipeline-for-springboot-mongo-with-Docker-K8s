@@ -2,39 +2,112 @@
 This is a jenkins pipeline project for a spring-boot-mongo application with Docker &amp; K8s integrated to deploy the application.
 
 
-Pre-requisites
-Terraform installed locally
-AWS account and keypair created in AWS
-Preferred IDE (I will use VS Code)
-AWS region: us-east-1
-Step-1: Install Jenkins server with Terraform
-We will install Jenkins server using Terraform and bootstrap with userdata script to install docker, ansible, docker-compose, python-boto3, awscli2. You need to have a key-pair ready to run the Terraform file. If you have one, update it in variables.tf or create a new key on AWS Console and update variables file with the key name. AMI used is latest AmazonLinux-2 in us-east-1 region
+# Pre-requisites
+AWS account
+Github Repository
+Docker Repository
+IDE: VS Code
 
-From jenkins_server directory we will run below commands:
+# Step-1: Provision Jenkins Server on AWS
+Launch an Ec2 Ubuntu instance (T2 medium) and for SG, open ports 22 (allow ssh traffic) and port 8080. We will install Jenkins & Docker on the server using bootstrap with userdata script to install docker or SSH into the istance and run the commands below to install jenkins and docker.
 
-terraform init
-terraform plan
-terraform apply
+# install Jenkins
+a) Update system package
+   sudo apt update 
+b) Install Java Version 8 or 11
+   sudo apt install openjdk-11-jdk -y
+c) Confirm java is installed
+   java -version
+d) Add Jenkins repo to Ubuntu by importing GPG key to verify package integrity & then add Jenkins repo to source list
+   curl -fsSL https://pkg.jenkins.io/debian-stable/jenkins.io.key | sudo tee /usr/share/keyrings/jenkins-keyring.asc &gt; /dev/null
+   echo deb [signed-by=/usr/share/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian-stable binary/ | sudo tee /etc/apt/sources.list.d/jenkins.list &gt; /dev/null
+e) Update repo again and install jenkins
+   sudo apt update
+   sudo apt install jenkins -y
+   sudo systemctl status jenkins
+   sudo systemctl enable --now jenkins # run this command if jenkins service is not running or active
+f) Modify firewalls to allow jenkins port if not opened
+   sudo ufw allow 8080
+   sudo ufw status
+   sudo ufw enable # run this command if status is inactive 
+g) open Jenkins ip on web browser to set up jenkins
+   http://ip_address:8080
+h) cat the path seen on the page to unlock jenkins password
+   sudo cat /var/lib/jenkins/secrets/initialAdminPassword
+i) Enter the password output in the Administrator password field and click Continue. Install suggested pluggins and create first admin by entering credentials you want    to use as jenkins admin. set up instance configuration, save and start using jenkins.
 
+ # install Docker on Jenkins
+ a) Install Docker
+    curl -fsSL get.docker.com | /bin/bash  
+ b) Add Jenkins User to docker group  
+    sudo usermod -aG docker jenkins  
+ c) Restart Jenkins
+    sudo systemctl restart jenkins
 
-Step-2: Create a GitHub repository
-We will create a private repository in GitHub to store source code files.
+# Step-2: Provision K8s Master Node & Worker Nodes Servers
+SSH into the servers and run the following commands on the CLI of both servers
+sudo apt-get update -y  
+sudo apt-get install -y apt-transport-https  
+sudo su -  
 
+curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add -
 
+cat <<EOF >/etc/apt/sources.list.d/kubernetes.list  
+deb https://apt.kubernetes.io/ kubernetes-xenial main  
+EOF  
 
-Then to be able to access this repo from Jenkins, we will create an access token from GitHub.
+ # Note: when you paste the above line wait a while before hitting the enter key 
+apt-get update -y  
+Disable swap memory
+swapoff -a  
+sed -i '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab 
 
-Go to your GitHub avatar, click settings -> Developer Settings -> Personal Access Tokens -> Create new token and copy it to somewhere.We will need this token later.
+# Enable IP memories:
+modprobe br_netfilter
+sysctl -p  
+sudo sysctl net.bridge.bridge-nf-call-iptables=1  
 
+# Add ubuntu user to the docker group
+apt  install docker.io -y
 
+This is optional
+usermod -aG docker ubuntu  
 
-Step-3: Clone repo to Jenkins server
-We will SSH into jenkins server, I will use VS Code Remote SSH plugin to connect Jenkins. Once we are connected, we will clone our newly created repo to this server by using TOKEN we have just created.
+systemctl restart docker
+systemctl enable docker.service  
 
-git clone https://<replace_with_your_token>@https://github.com/rumeysakdogan/rd-todo-app.git
-Next we will copy nodejs, react and postgresql folders given under todo-app directory to our repo. Since I am using remote SSH extension, I will drag/drop the files to my VS Code.You can copy the files under todo-app in your local and push it to GitHub as well.
+# Install k8s modules:
+apt-get install -y kubelet kubeadm kubectl kubernetes-cni  
 
-Step-4: Create docker files for Nodejs, Postgres and React
+systemctl daemon-reload
+systemctl start kubelet   
+systemctl enable kubelet.service  
+
+# Execute below commands only in master node as root user.  
+kubeadm init  
+Exit root user (exit) & execute as normal user  
+mkdir -p $HOME/.kube  
+sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config  
+sudo chown $(id -u):$(id -g) $HOME/.kube/config  
+
+kubectl get nodes
+kubectl get pods --all-namespaces
+
+kubectl apply -f "https://cloud.weave.works/k8s/net?k8s-version=$(kubectl version |  base64 | tr -d '\n')"  
+
+kubectl get nodes  
+kubectl get pods --all-namespaces 
+  
+# on worker nodes, exit as root user and run commands to join worker node to master node.
+kubectl get nodes  
+kubectl get pods --all-namespaces 
+  
+# Step-3: Create a GitHub private repository (to store source code files)
+SSH into jenkins server and clone repo to jenkins server
+  git clone url copied from github
+  copy files (app codes) to repo or upload files to github
+
+# Step-4: Create docker files 
 Dockerfile for Postgres
 Create a dockerfile-postgresql with below content under postgresql directory.
 
@@ -92,103 +165,7 @@ compose:
 Step-6: Create Terraform file to create 3 nodes for each each tier of application
 We will create 3 servers with Jenkins using the terraform we have installed while provisioning Jenkins server. Create main.tf with the content given under todo-app folder.
 
-terraform {
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 4.0"
-    }
-  }
-}
 
-provider "aws" {
-  region = "us-east-1"
-}
-
-variable "tags" {
-  default = ["postgresql", "nodejs", "react"]
-}
-
-resource "aws_instance" "managed_nodes" {
-  ami = "ami-0176fddd9698c4c3a" #RHEL 9 with HA
-  count = 3
-  instance_type = "t2.micro"
-  key_name = "FirstKey"  #replace with your key name
-  vpc_security_group_ids = [aws_security_group.tf-sec-gr.id]
-  iam_instance_profile = "jenkins-project18-profile" #same profile used in jenkins server creation
-  tags = {
-    Name = "ansible_${element(var.tags, count.index )}"
-    stack = "ansible_project"
-    environment = "development"
-  }
-}
-
-resource "aws_security_group" "tf-sec-gr" {
-  name = "appSecGrp"
-  tags = {
-    Name = "appSecGrp"
-  }
-
-  ingress {
-    from_port   = 22
-    protocol    = "tcp"
-    to_port     = 22
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-  ingress {
-    from_port   = 5000
-    protocol    = "tcp"
-    to_port     = 5000
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-  ingress {
-    from_port   = 3000
-    protocol    = "tcp"
-    to_port     = 3000
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-  ingress {
-    from_port   = 5432
-    protocol    = "tcp"
-    to_port     = 5432
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  egress {
-    from_port   = 0
-    protocol    = -1
-    to_port     = 0
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}
-
-output "react_ip" {
-  value = "http://${aws_instance.managed_nodes[2].public_ip}:3000"
-}
-
-output "node_public_ip" {
-  value = aws_instance.managed_nodes[1].public_ip
-
-}
-
-output "postgre_private_ip" {
-  value = aws_instance.managed_nodes[0].private_ip
-
-}
-Step-7: Create docker_project.yml for Ansible
-We will create a playbook docker_project.yml to configure 3 app servers with Ansible.
-
-- name: install docker and config
-  hosts: _development
-  become: true
-  vars:
-    aws_region: us-east-1
-    ecr_registry: <your_AWS_account_number>.dkr.ecr.us-east-1.amazonaws.com  # can be found in AWS as Account ID: XXXX-XXXX-XXXX
-  tasks:
-    - name: update all packages
-      yum:
-        name: '*'
-        state: latest
 
     # we may need to uninstall any existing docker files from the centos repo first.
     - name: Remove docker if installed from CentOS repo
