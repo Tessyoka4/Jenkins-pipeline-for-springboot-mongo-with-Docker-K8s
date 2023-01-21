@@ -10,7 +10,8 @@ EOF
 
 # Note: when you paste the above line wait a while before hitting the enter key 
 apt-get update -y  
-Disable swap memory
+
+# Disable swap memory
 swapoff -a  
 sed -i '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab 
 
@@ -20,9 +21,9 @@ sysctl -p
 sudo sysctl net.bridge.bridge-nf-call-iptables=1  
 
 # Add ubuntu user to the docker group
-apt  install docker.io -y
+apt install docker.io -y
 
-This is optional
+# This is optional
 usermod -aG docker ubuntu  
 
 systemctl restart docker
