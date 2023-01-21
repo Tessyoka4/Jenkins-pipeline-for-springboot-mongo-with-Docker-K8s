@@ -103,219 +103,166 @@ kubectl get nodes
 kubectl get pods --all-namespaces 
   
 # Step-3: Create a GitHub private repository (to store source code files)
-SSH into jenkins server and clone repo to jenkins server
-  git clone url copied from github
+SSH into jenkins server and clone repo to jenkins server.
+  git clone url copied from github.
   copy files (app codes) to repo or upload files to github
 
-# Step-4: Create docker files 
-Dockerfile for Postgres
-Create a dockerfile-postgresql with below content under postgresql directory.
+# Step-4: Create docker file (build instruction required to build the image)
+   FROM openjdk:11-alpine
 
-FROM postgres
-COPY ./postgresql/init.sql /docker-entrypoint-initdb.d/
-EXPOSE 5432
-Dockerfile for React
-Create a dockerfile-react with below content under react directory.
+   RUN apk update && apk add /bin/sh
 
-FROM node:14
-# Create app directory
-WORKDIR /app
-COPY ./react/client/package*.json ./
-RUN yarn install
-# copy all files into the image
-COPY ./react/client/ .
-EXPOSE 3000
-CMD ["yarn", "run", "start"]
-Dockerfile for Nodejs
-Create a dockerfile-nodejs with below content under nodejs directory.
+   RUN mkdir -p /opt/app
+   ENV PROJECT_HOME /opt/app
 
-FROM node:14
-# Create app directory
-WORKDIR /usr/src/app
-COPY ./nodejs/server/package*.json ./
-RUN npm install
-# If you are building your code for production
-# RUN npm ci --only=production
+   COPY target/spring-boot-mongo-1.0.jar $PROJECT_HOME/spring-boot-mongo.jar
 
-# copy all files into the image
-COPY ./nodejs/server/ .
-EXPOSE 5000
-CMD ["node","app.js"]
-Step-5: Create Ansible config and Dynamic Inventory file
-We will create ansible.cfg file under our repository.
+   WORKDIR $PROJECT_HOME
+   EXPOSE 8080
+   CMD ["java" ,"-jar","./spring-boot-mongo.jar"]
 
-[defaults]
-host_key_checking=False
-inventory=inventory_aws_ec2.yml
-deprecation_warnings=False
-interpreter_python=auto_silent
-remote_user=ec2-user
-We will also create a dynamic inventory file in our repository. Jenkins will create our application servers with terraform, aws will identify those servers with the given tags and add to our dynamic inventory.
+ # Step-5: Create Manifest File (build instruction required to build the image)  
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: springappconfigmap
+data:
+  username: springapp
+  password: mongodb@123
 
-plugin: aws_ec2
-regions:
-  - "us-east-1"
-filters:
-  tag:stack: ansible_project
-keyed_groups:
-  - key: tags.Name
-  - key: tags.environment
-compose:
-  ansible_host: public_ip_address
-Step-6: Create Terraform file to create 3 nodes for each each tier of application
-We will create 3 servers with Jenkins using the terraform we have installed while provisioning Jenkins server. Create main.tf with the content given under todo-app folder.
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: springappsecrets
+type: Opaque
+stringData:   # We can define multiple key value pairs.
+  password: devdb@123
 
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-hostpath
+spec:
+  storageClassName: manual
+  capacity:
+    storage: 1Gi
+  accessModes:
+  - ReadWriteOnce
+  hostPath:
+    path: "/tmp/mongodata"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-hostpath
+spec:
+  storageClassName: manual
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Mi
 
-
-    # we may need to uninstall any existing docker files from the centos repo first.
-    - name: Remove docker if installed from CentOS repo
-      yum:
-        name: "{{ item }}"
-        state: removed
-      with_items:
-        - docker
-        - docker-client
-        - docker-client-latest
-        - docker-common
-        - docker-latest
-        - docker-latest-logrotate
-        - docker-logrotate
-        - docker-engine
-
-    - name: Install yum utils
-      yum:
-        name: "{{ item }}"
-        state: latest
-      with_items:
-        - yum-utils
-        - device-mapper-persistent-data
-        - lvm2
-        - unzip
-
-    - name: Add Docker repo
-      get_url:
-        url: https://download.docker.com/linux/centos/docker-ce.repo
-        dest: /etc/yum.repos.d/docer-ce.repo
-
-    - name: Install Docker
-      package:
-        name: docker-ce
-        state: latest
-
-    - name: Install pip
-      package:
-        name: python3-pip
-        state: present
-        update_cache: true
-
-    - name: Install docker sdk
-      pip:
-        name: docker
-
-    - name: Add user ec2-user to docker group
-      user:
-        name: ec2-user
-        groups: docker
-        append: yes
-
-    - name: Start Docker service
-      service:
-        name: docker
-        state: started
-        enabled: yes
-
-    - name: install aws cli
-      get_url:
-        url: https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip
-        dest: /home/ec2-user/awscliv2.zip
-
-    - name: unzip zip file
-      unarchive:
-        src: /home/ec2-user/awscliv2.zip
-        dest: /home/ec2-user
-        remote_src: True
-
-    - name: run the awscli
-      shell: ./aws/install
-
-    - name: log in to AWS ec2-user
-      shell: |
-        export PATH=/usr/local/bin:$PATH
-        source ~/.bash_profile
-        aws ecr get-login-password --region {{ aws_region }} | docker login --username AWS --password-stdin {{ ecr_registry }}
-
-- name: postgre database config
-  hosts: _ansible_postgresql
-  become: true
-  vars:
-    postgre_container: /home/ec2-user/postgresql
-    container_name: rumeysa_postgre
-    image_name: <your_AWS_account_number>.dkr.ecr.us-east-1.amazonaws.com/rumeysa-repo/todo-app:postgr
-  tasks:
-    - name: remove {{ container_name }} container and {{ image_name }} if exists
-      shell: "docker ps -q --filter 'name={{ container_name }}' && docker stop {{ container_name }} && docker rm -fv {{ container_name }} && docker image rm -f {{ image_name }} || echo 'Not Found'"
-
-    - name: Launch postgresql docker container
-      docker_container:
-        name: "{{ container_name }}"
-        image: "{{ image_name }}"
-        state: started
+---
+## Spring Boot App
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: springappdeployment
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: springapp
+  template:
+    metadata:
+      name: springapppod
+      labels:
+        app: springapp
+    spec:
+      containers:
+      - name: springappcontainer
+        image: acadalearning/spring-boot-mongo
         ports:
-          - "5432:5432"
+        - containerPort: 8080
         env:
-          POSTGRES_PASSWORD: "Pp123456789"
-        volumes:
-          - /db-data:/var/lib/postgresql/data
-
-- name: Nodejs Server configuration
-  hosts: _ansible_nodejs
-  become: true
-  vars:
-    container_path: /home/ec2-user/nodejs
-    container_name: rumeysa_nodejs
-    image_name: <your_AWS_account_number>.dkr.ecr.us-east-1.amazonaws.com/rumeysa-repo/todo-app:nodejs
-  tasks:
-    - name: remove {{ container_name }} container and {{ image_name }} if exists
-      shell: "docker ps -q --filter 'name={{ container_name }}' && docker stop {{ container_name }} && docker rm -fv {{ container_name }} && docker image rm -f {{ image_name }} || echo 'Not Found'"
-
-    - name: Launch postgresql docker container
-      docker_container:
-        name: "{{ container_name }}"
-        image: "{{ image_name }}"
-        state: started
-        ports:
-          - "5000:5000"
-
-- name: React UI Server configuration
-  hosts: _ansible_react
-  become: true
-  vars:
-    container_path: /home/ec2-user/react
-    container_name: rumeysa_react
-    image_name: <your_AWS_account_number>.dkr.ecr.us-east-1.amazonaws.com/rumeysa-repo/todo-app:react
-  tasks:
-    - name: remove {{ container_name }} container and {{ image_name }} image if exists
-      shell: "docker ps -q --filter 'name={{ container_name }}' && docker stop {{ container_name }} && docker rm -fv {{ container_name }} && docker image rm -f {{ image_name }} || echo 'Not Found'"
-
-    - name: Launch react docker container
-      docker_container:
-        name: "{{ container_name }}"
-        image: "{{ image_name }}"
-        state: started
-        ports:
-          - "3000:3000"
-Step-8: Create templates for nodejs and react
-We will create node-env-template under repository which will be used by Jenkins and DB_HOST will be replaced after Jenkins created Postgre server with Terraform.
-
-SERVER_PORT=5000
-DB_USER=postgres
-DB_PASSWORD=Pp123456789
-DB_NAME=rumeysatodo
-DB_HOST=${DB_HOST}
-DB_PORT=5432
-We will create react-env-template under repository which will be used by Jenkins.
-
-REACT_APP_BASE_URL=http://${NODE_IP}:5000/
+        - name: MONGO_DB_USERNAME
+          valueFrom:
+            configMapKeyRef:
+              name: springappconfigmap
+              key: username
+        - name: MONGO_DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: springappsecrets
+              key: password
+        - name: MONGO_DB_HOSTNAME
+          value: mongo
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: springapp
+spec:
+  selector:
+    app: springapp
+  ports:
+  - port: 80
+    targetPort: 8080
+  type: NodePort
+---
+# Mongo db pod with volumes(HostPath)
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  name: mongodbrs
+spec:
+  selector:
+    matchLabels:
+      app: mongodb
+  template:
+     metadata:
+       name: mongodbpod
+       labels:
+         app: mongodb
+     spec:
+       volumes:
+       - name: mongodb-pvc
+         persistentVolumeClaim:
+           claimName: pvc-hostpath
+       containers:
+       - name: mongodbcontainer
+         image: mongo
+         ports:
+         - containerPort: 27017
+         env:
+         - name: MONGO_INITDB_ROOT_USERNAME
+           valueFrom:
+             configMapKeyRef:
+               name: springappconfigmap
+               key: username
+         - name: MONGO_INITDB_ROOT_PASSWORD
+           valueFrom:
+             secretKeyRef:
+               name: springappsecrets
+               key: password
+         volumeMounts:
+         - name: mongodb-pvc
+           mountPath: /data/db
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo
+spec:
+  type: ClusterIP
+  selector:
+    app: mongodb
+  ports:
+  - port: 27017
+    targetPort: 27017
 Step-9: Configure Jenkins server
 Connect to the jenkins server http://<jenkins-server public ip>:8080.
 
