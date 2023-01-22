@@ -60,7 +60,7 @@ spec:
     spec:
       containers:
       - name: springappcontainer
-        image: tessyoka4/spring-boot-mongo
+        image: tessyoka4/spring-app
         ports:
         - containerPort: 8080
         env:
