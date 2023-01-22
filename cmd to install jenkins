@@ -1,0 +1,31 @@
+# Update system package
+sudo apt update 
+ 
+# Install Java Version 8 or 11
+sudo apt install openjdk-11-jdk -y
+
+# Confirm java is installed
+java -version
+
+# install wget
+sudo apt-get install git wget -y
+
+# Add Jenkins repo to Ubuntu by importing GPG key to verify package integrity & then add Jenkins repo to source list
+curl -fsSL https://pkg.jenkins.io/debian-stable/jenkins.io.key | sudo tee /usr/share/keyrings/jenkins-keyring.asc > /dev/null
+echo deb [signed-by=/usr/share/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian-stable binary/ | sudo tee /etc/apt/sources.list.d/jenkins.list > /dev/null
+
+# Update repo again and install jenkins
+sudo apt update
+sudo apt install jenkins -y
+sudo systemctl status jenkins
+sudo systemctl enable --now jenkins # run this command if jenkins service is not running or active
+
+# Modify firewalls to allow jenkins port if not opened
+sudo ufw allow 8080
+sudo ufw status
+sudo ufw enable # run this command if status is inactive 
+
+# open Jenkins ip on web browser to set up jenkins: http://ip_address:8080
+
+# cat the path seen on the page to unlock jenkins password
+sudo cat /var/lib/jenkins/secrets/initialAdminPassword
