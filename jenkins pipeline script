@@ -1,0 +1,27 @@
+node{
+    stage ("Git Clone"){
+        git branch: 'main', credentialsId: 'gitcred', url: 'https://github.com/Tessyoka4/Jenkins-pipeline-for-springboot-mongo-with-Docker-K8s.git'
+    }
+    
+    stage ("Maven Build"){
+    def mavenHome = tool name: "Maven3.8.6", type: "maven"
+    def mavenCMD = "${mavenHome}/bin/mvn"
+    sh "${mavenCMD} clean package"
+    }
+    
+    stage ("Docker Image Build"){
+    sh "docker build -t tessyoka4/spring-app ."
+    }
+    
+    stage ("Docker Push"){
+        withCredentials([string(credentialsId: '407cfc48-850c-4760-8e21-c22c46b2b39a', variable: 'DOCKER_HUB_CRED')]) {
+    // some block
+    sh "docker login -u tessyoka4 -p ${DOCKER_HUB_CRED}"
+        }
+    sh "docker push tessyoka4/spring-app"
+    }
+    
+    stage ("Deploy to k8s"){
+    sh "kubectl apply -f springBootMongo.yml"
+    }
+}
